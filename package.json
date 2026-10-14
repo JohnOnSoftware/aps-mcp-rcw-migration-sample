@@ -1,0 +1,22 @@
+{
+  "name": "au2026-mcp-workshop-advanced",
+  "version": "1.0.0",
+  "description": "APS MCP Workshop — Advanced Session (AU2026)",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env index.js"
+  },
+  "dependencies": {
+    "@aps_sdk/authentication": "^1.0.0",
+    "@aps_sdk/data-management": "^1.1.0",
+    "@modelcontextprotocol/express": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "zod": "^4.4.0"
+  }
+}
