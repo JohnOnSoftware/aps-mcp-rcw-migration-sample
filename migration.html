@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de;
+      --active: #0969da; --success: #1a7f37; --failed: #cf222e; --cancelled: #656d76;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --active: #58a6ff; --success: #3fb950; --failed: #f85149; --cancelled: #8b949e; }
+    }
+    html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+    main { padding: 12px 16px; }
+    header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    h1 { font-size: 15px; margin: 0; }
+    #count, #notice { color: var(--muted); font-size: 12px; }
+    #notice { margin-bottom: 8px; color: var(--failed); }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { border-top: 1px solid var(--line); padding: 8px 0; }
+    .row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 12px; align-items: center; }
+    .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status { font-weight: 600; }
+    .status.active { color: var(--active); } .status.success { color: var(--success); }
+    .status.failed { color: var(--failed); } .status.cancelled { color: var(--cancelled); }
+    .time { color: var(--muted); font-variant-numeric: tabular-nums; }
+    button { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    pre { margin: 6px 0 0; padding: 8px; max-height: 180px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
+    #empty { color: var(--muted); }
+    #diag { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+
+<body>
+  <main>
+    <header>
+      <h1 id="title">RCW model migration</h1>
+      <span id="count"></span>
+    </header>
+    <div id="notice" hidden></div>
+    <div id="empty">Waiting for migration jobs…</div>
+    <ul id="jobs"></ul>
+    <div id="diag">Connecting to host…</div>
+  </main>
+  <script type="module">
+    import { App } from 'https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@1.7.5/dist/src/app-with-deps.js';
+
+    /*__MIGRATION_LOGIC__*/
+
+    const app = new App({ name: 'RCW Migration Progress', version: '1.0.0' });
+    let jobs = [];
+    let failures = 0;
+    let pollTimer = null;
+    let summarySent = false;
+    const expanded = new Set();
+    const cancelling = new Set();
+
+    const diag = (text) => { document.getElementById('diag').textContent = text; };
+    window.addEventListener('error', (e) => diag(`Page error: ${e.message}`));
+    window.addEventListener('unhandledrejection', (e) => diag(`Page error: ${e.reason?.message ?? e.reason}`));
+
+    // Some hosts drop structuredContent, so fall back to a JSON text block.
+    function jobsFromResult(result) {
+      if (result?.structuredContent?.jobs) return result.structuredContent.jobs;
+      for (const block of result?.content ?? []) {
+        if (block.type !== 'text' || !block.text.trimStart().startsWith('{')) continue;
+        try { const parsed = JSON.parse(block.text); if (parsed.jobs) return parsed.jobs; } catch { /* not JSON */ }
+      }
+      return null;
+    }
+
+    app.ontoolresult = (result) => {
+      const incoming = jobsFromResult(result);
+      if (!incoming?.length) { diag('Received a tool result without migration jobs.'); return; }
+      diag(`Received ${incoming.length} job(s).`);
+      jobs = mergeJobs(jobs, incoming);
+      summarySent = false;
+      render();
+      schedulePoll(0);
+    };
+    app.connect().then(() => diag('Connected to host. Waiting for the tool result…'), (err) => diag(`Could not connect to host: ${err.message}`));
+
+    const active = () => jobs.filter((j) => !isTerminal(j.status));
+
+    function schedulePoll(delayMs) {
+      clearTimeout(pollTimer);
+      if (active().length) pollTimer = setTimeout(poll, delayMs);
+    }
+
+    async function poll() {
+      const ids = active().map((j) => j.workItemId);
+      if (!ids.length) return;
+      try {
+        const result = await app.callServerTool({ name: 'get-migration-status', arguments: { workItemIds: ids } });
+        if (result.isError) throw new Error(result.content?.[0]?.text ?? 'Status request failed');
+        jobs = mergeJobs(jobs, jobsFromResult(result));
+        failures = 0;
+        setNotice('');
+      } catch (err) {
+        failures++;
+        setNotice(`Could not refresh status (${err.message}). Retrying…`);
+      }
+      render();
+      schedulePoll(failures ? nextDelay(failures) : 5000);
+    }
+
+    async function cancel(job) {
+      cancelling.add(job.workItemId);
+      render();
+      try {
+        const result = await app.callServerTool({ name: 'cancel-migration', arguments: { workItemId: job.workItemId } });
+        if (result.isError) throw new Error(result.content?.[0]?.text ?? 'Cancel failed');
+        jobs = mergeJobs(jobs, jobsFromResult(result));
+      } catch (err) {
+        setNotice(`Could not cancel ${job.fileName}: ${err.message}`);
+      }
+      cancelling.delete(job.workItemId);
+      render();
+    }
+
+    function setNotice(text) {
+      const el = document.getElementById('notice');
+      el.textContent = text;
+      el.hidden = !text;
+    }
+
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text != null) node.textContent = text; // textContent only: job data is never parsed as HTML
+      return node;
+    };
+
+    function timeCell(job) {
+      const cell = el('span', 'time', formatElapsed(job.submittedAt, job.finishedAt, Date.now()));
+      cell.dataset.id = job.workItemId;
+      return cell;
+    }
+
+    function render() {
+      document.getElementById('empty').hidden = jobs.length > 0;
+      const versions = [...new Set(jobs.map((j) => j.revitVersion))];
+      document.getElementById('title').textContent = versions.length ? `RCW model migration → Revit ${versions.join(', ')}` : 'RCW model migration';
+      const ok = jobs.filter((j) => j.status === 'success').length;
+      document.getElementById('count').textContent = jobs.length ? `${ok}/${jobs.length} done` : '';
+
+      const list = document.getElementById('jobs');
+      list.replaceChildren(...jobs.map((job) => {
+        const info = statusInfo(job.status);
+        const row = el('div', 'row');
+        row.append(el('span', 'name', job.fileName), el('span', `status ${info.kind}`, info.label),
+          timeCell(job));
+        const actions = el('span');
+        if (!isTerminal(job.status)) {
+          const btn = el('button', null, cancelling.has(job.workItemId) ? 'Cancelling…' : 'Cancel');
+          btn.disabled = cancelling.has(job.workItemId);
+          btn.onclick = () => cancel(job);
+          actions.append(btn);
+        } else if (info.kind === 'failed') {
+          const btn = el('button', null, expanded.has(job.workItemId) ? 'Hide details' : 'Details');
+          btn.onclick = () => { expanded.has(job.workItemId) ? expanded.delete(job.workItemId) : expanded.add(job.workItemId); render(); };
+          actions.append(btn);
+        }
+        row.append(actions);
+        const item = el('li');
+        item.append(row);
+        if (job.target?.folderPath) item.append(el('div', 'time', `${job.source?.folderPath ?? '?'} → ${job.target.folderPath}`));
+        if (expanded.has(job.workItemId)) item.append(el('pre', null, job.reportTail || 'No report log available.'));
+        return item;
+      }));
+
+      if (jobs.length && !active().length && !summarySent) {
+        summarySent = true;
+        app.updateModelContext({ content: [{ type: 'text', text: summarize(jobs) }] });
+      }
+    }
+
+    // Keep elapsed times ticking while anything is running.
+    // Only the time cells are touched so buttons and open logs keep their state.
+    setInterval(() => {
+      for (const job of active()) {
+        const cell = document.querySelector(`.time[data-id="${CSS.escape(job.workItemId)}"]`);
+        if (cell) cell.textContent = formatElapsed(job.submittedAt, job.finishedAt, Date.now());
+      }
+    }, 1000);
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ApplicationPackage>
+  <Components Description="Revit Cloud Model Migrate app">
+    <RuntimeRequirements OS="Win64"
+                         Platform="Revit"
+                         SeriesMin="R2025"
+                         SeriesMax="R2026" />
+    <ComponentEntry AppName="RCWMigrator"
+                    Version="1.0.0"
+                    ModuleName="./Contents/RCWMigrator.addin"
+                    AppDescription="Migrate Revit Cloud Model to Another Project"
+                    LoadOnCommandInvocation="False"
+                    LoadOnRevitStartup="True" />
+  </Components>
+</ApplicationPackage>

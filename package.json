@@ -7,7 +7,9 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env index.js"
+    "start": "node --env-file-if-exists=.env index.js",
+    "setup-da": "node --env-file-if-exists=.env scripts/setup-da.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@aps_sdk/authentication": "^1.0.0",

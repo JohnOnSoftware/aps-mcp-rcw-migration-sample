@@ -12,6 +12,7 @@ The server connects GitHub Copilot (or any MCP-compatible client) to the hubs an
 | --- | --- | --- |
 | `list-hubs-projects` | — | Lists all hubs and their projects accessible to the authenticated user |
 | `list-folder-contents` | `hubId`, `projectId`, `folderId?` | Lists folder contents; omit `folderId` to get top-level folders |
+| `create-folder` | `projectId`, `parentFolderId`, `folderPath` | Creates a folder or nested path in an ACC/BIM 360 project, reusing existing segments; only on explicit request |
 | `preview-design` | `projectId`, `designId`, `region?` | Returns a payload the embedded APS Viewer UI uses to load the model |
 
 ### Viewer UI resource

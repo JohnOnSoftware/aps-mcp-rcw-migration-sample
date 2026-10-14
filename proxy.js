@@ -19,7 +19,18 @@ async function resolveClient(clientId) {
 }
 
 function isRegisteredRedirectUri(requested, client) {
-    return typeof requested === 'string' && (client.redirect_uris ?? []).includes(requested);
+    if (typeof requested !== 'string') return false;
+    const registered = client.redirect_uris ?? [];
+    if (registered.includes(requested)) return true;
+    // RFC 8252 §7.3: loopback redirects may use any port, so ignore it when matching.
+    try {
+        const url = new URL(requested);
+        if (url.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) return false;
+        url.port = '';
+        return registered.includes(url.href);
+    } catch {
+        return false;
+    }
 }
 
 export function createOAuthProxy({ issuerUrl, resourceUrl, apsClientId, apsClientSecret, callbackUrl }) {
