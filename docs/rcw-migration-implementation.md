@@ -2,6 +2,8 @@
 
 把 [aps-revit-rcw-migrate-automation](https://github.com/autodesk-platform-services/aps-revit-rcw-migrate-automation) 的迁移能力移植到本 MCP 服务器：用户在 AI 客户端里用自然语言选择源 RCW 模型和目标文件夹，服务器通过 Design Automation for Revit 执行 `SaveAsCloudModel`，并用 MCP App 页面实时展示迁移进度。
 
+> **实现状态（截至当前提交）**：已实现 `check-migrator-setup`、`migrate-rcw-model`、`get-migration-status`、`cancel-migration`、`migration.html`，以及相关的 `list-folder-contents`（返回 `extensionType`）与 `create-folder`。**`migrate-rcw-folder`（§8.3）尚未实现**——迁移整个文件夹时，目前由模型对每个 RCW 模型分别调用 `migrate-rcw-model`。仓库内仅包含 Revit 2025 / 2026 的插件包（`bundles/`），2027 需自行编译。
+
 ## 1. 已确认的设计决策
 
 | # | 决策 | 结论 |
@@ -248,7 +250,7 @@ const workitem = {
 - `_meta: { ui: { resourceUri: 'ui://aps-mcp/migration.html' } }`
 - `annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }`
 
-### 8.3 `migrate-rcw-folder`
+### 8.3 `migrate-rcw-folder`（设计中，尚未实现）
 
 - 输入：`sourceProjectId`、`sourceFolderId`，加上 §8.2 中的目标参数与 `revitVersion`（无 `targetName`）
 - 逻辑：列出源文件夹（**不递归**），筛选 `extensionType === 'items:autodesk.bim360:C4RModel'`，**最多 5 个**（保留原仓库限制，超出时返回错误并列出文件数，让用户缩小范围）；逐个复用 §8.2 的提交逻辑
@@ -286,6 +288,8 @@ DA 状态值：`pending`、`inprogress`、`success`、`cancelled`、`failedDownl
 - `annotations: { destructiveHint: true }`；`_meta.ui.visibility: ['model', 'app']`（页面上的取消按钮会调用）
 
 ### 8.6 现有工具改动
+
+另新增 `create-folder`（`projectId`、`parentFolderId`、`folderPath`）：在目标项目中创建文件夹或嵌套路径，已存在的层级会被复用，仅在用户明确要求时调用。迁移前可用它建好目标目录结构。
 
 `list-folder-contents` 输出每项新增 `extensionType`（`item.attributes.extension.type`），模型据此识别 RCW 模型（`items:autodesk.bim360:C4RModel`）。
 
